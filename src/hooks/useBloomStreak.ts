@@ -9,7 +9,7 @@ interface BloomStreakState {
 }
 
 const STORAGE_KEY = "mindsync-bloom-streak";
-const DAILY_GOAL_HOURS = 4; // 4 hours = 100% progress
+const DAILY_GOAL_HOURS = 1; // 1 hours = 100% progress
 const DAILY_GOAL_SECONDS = DAILY_GOAL_HOURS * 3600;
 
 export function useBloomStreak() {
