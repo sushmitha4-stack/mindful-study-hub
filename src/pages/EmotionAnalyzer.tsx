@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Camera, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -28,17 +28,69 @@ const emotionColors: Record<string, string> = {
 export default function EmotionAnalyzer() {
   const [text, setText] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<{ emotion: string; confidence: number; reasoning?: string } | null>(null);
+  const [result, setResult] = useState<{ emotion: string; confidence: number; reasoning?: string; motivation?: string } | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setIsCameraActive(true);
+    } catch (err) {
+      console.error('Camera access error:', err);
+      toast({
+        title: "Camera Access Denied",
+        description: "Please allow camera access to analyze facial expressions.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const captureImage = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0);
+        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+        setCapturedImage(imageData);
+        stopCamera();
+      }
+    }
+  };
+
+  const clearImage = () => {
+    setCapturedImage(null);
+  };
+
   const handleAnalyze = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() && !capturedImage) return;
     
     setAnalyzing(true);
     
     try {
       const { data, error } = await supabase.functions.invoke('analyze-emotion', {
-        body: { text }
+        body: { 
+          text: text.trim() || undefined,
+          image: capturedImage || undefined
+        }
       });
 
       if (error) {
@@ -63,7 +115,8 @@ export default function EmotionAnalyzer() {
       setResult({
         emotion: data.emotion,
         confidence: Math.round(data.confidence),
-        reasoning: data.reasoning
+        reasoning: data.reasoning,
+        motivation: data.motivation
       });
     } catch (err) {
       console.error('Unexpected error:', err);
@@ -87,7 +140,7 @@ export default function EmotionAnalyzer() {
         <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
           Emotion Analyzer
         </h1>
-        <p className="text-muted-foreground">AI-powered emotional insight from your thoughts</p>
+        <p className="text-muted-foreground">AI-powered emotional insight from your thoughts and expressions</p>
       </motion.div>
 
       <motion.div
@@ -99,16 +152,70 @@ export default function EmotionAnalyzer() {
           <div>
             <label className="block text-sm font-medium mb-2">How are you feeling?</label>
             <Textarea
-              placeholder="Share your thoughts or describe how you're feeling today..."
+              placeholder="Share your thoughts or describe how you're feeling today... (optional)"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="min-h-[150px] resize-none"
+              className="min-h-[120px] resize-none"
             />
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-medium">Or capture your expression</label>
+            
+            {!isCameraActive && !capturedImage && (
+              <Button
+                onClick={startCamera}
+                variant="outline"
+                className="w-full"
+              >
+                <Camera className="mr-2 h-5 w-5" />
+                Use Camera
+              </Button>
+            )}
+
+            {isCameraActive && (
+              <div className="space-y-3">
+                <div className="relative rounded-lg overflow-hidden bg-muted">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full aspect-video object-cover"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={captureImage} className="flex-1">
+                    <Camera className="mr-2 h-4 w-4" />
+                    Capture
+                  </Button>
+                  <Button onClick={stopCamera} variant="outline">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {capturedImage && (
+              <div className="space-y-3">
+                <div className="relative rounded-lg overflow-hidden">
+                  <img src={capturedImage} alt="Captured" className="w-full aspect-video object-cover" />
+                  <Button
+                    onClick={clearImage}
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           <Button
             onClick={handleAnalyze}
-            disabled={!text.trim() || analyzing}
+            disabled={(!text.trim() && !capturedImage) || analyzing}
             className="w-full bg-gradient-primary text-primary-foreground hover:opacity-90 shadow-soft"
             size="lg"
           >
@@ -163,8 +270,19 @@ export default function EmotionAnalyzer() {
                   />
                 </div>
 
-                <div className="pt-4 text-sm text-muted-foreground">
-                  <p>Remember: It's okay to feel this way. Your emotions are valid.</p>
+                {result.motivation && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="pt-4 px-4 py-3 bg-primary/10 rounded-lg border border-primary/20"
+                  >
+                    <p className="text-sm font-medium text-foreground">{result.motivation}</p>
+                  </motion.div>
+                )}
+
+                <div className="pt-2 text-sm text-muted-foreground">
+                  <p>Remember: Your emotions are valid. Take care of yourself.</p>
                 </div>
               </div>
             </Card>
