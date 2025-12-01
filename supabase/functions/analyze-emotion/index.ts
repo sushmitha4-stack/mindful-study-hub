@@ -11,11 +11,11 @@ serve(async (req) => {
   }
 
   try {
-    const { text } = await req.json();
+    const { text, image } = await req.json();
     
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    if ((!text || typeof text !== 'string' || text.trim().length === 0) && !image) {
       return new Response(
-        JSON.stringify({ error: "Text input is required" }), 
+        JSON.stringify({ error: "Either text or image input is required" }), 
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -29,7 +29,36 @@ serve(async (req) => {
       );
     }
 
-    console.log("Analyzing emotion for text:", text.substring(0, 50) + "...");
+    console.log("Analyzing emotion for:", text ? `text: ${text.substring(0, 50)}...` : "image");
+
+    // Build messages array based on input type
+    const messages: any[] = [
+      { 
+        role: "system", 
+        content: "You are an emotion detection AI for a study buddy app called MindSync. Analyze the user's input (text, facial expression, or both) and detect their primary emotion. Provide a motivational message to help them during their study sessions based on their emotional state. Be supportive, encouraging, and gentle." 
+      }
+    ];
+
+    // Add user content based on what was provided
+    if (text && image) {
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: `Text: ${text}` },
+          { type: "image_url", image_url: { url: image } }
+        ]
+      });
+    } else if (image) {
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: "Analyze this facial expression:" },
+          { type: "image_url", image_url: { url: image } }
+        ]
+      });
+    } else {
+      messages.push({ role: "user", content: text });
+    }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -39,13 +68,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
-        messages: [
-          { 
-            role: "system", 
-            content: "You are an emotion detection AI. Analyze the user's text and determine their primary emotion. Return your analysis using the provided tool." 
-          },
-          { role: "user", content: text }
-        ],
+        messages,
         tools: [
           {
             type: "function",
@@ -69,9 +92,13 @@ serve(async (req) => {
                   reasoning: {
                     type: "string",
                     description: "Brief explanation of why this emotion was detected"
+                  },
+                  motivation: {
+                    type: "string",
+                    description: "A supportive, encouraging message (2-3 sentences) to motivate the student based on their emotion. Be warm, gentle, and specific to their emotional state."
                   }
                 },
-                required: ["emotion", "confidence", "reasoning"],
+                required: ["emotion", "confidence", "reasoning", "motivation"],
                 additionalProperties: false
               }
             }
